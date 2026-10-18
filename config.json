@@ -1,0 +1,27 @@
+{
+  "gui_processes": ["Cursor.exe", "Devin.exe", "Code.exe"],
+  "terminal_processes": ["WindowsTerminal.exe", "conhost.exe", "pwsh.exe", "cmd.exe", "wezterm-gui.exe", "alacritty.exe"],
+  "hotkeys": {
+    "inplace": "alt+q",
+    "popup": "alt+w"
+  },
+  "clipboard_timeout_ms": 300,
+  "restore_clipboard_delay_ms": 150,
+  "slang_dictionary": {
+    "сбилдить": "build",
+    "сбилди": "build",
+    "билд": "build",
+    "замокать": "mock",
+    "замокай": "mock",
+    "прокинуть": "pass",
+    "прокинь": "pass",
+    "ручка": "endpoint",
+    "ручки": "endpoints",
+    "ручку": "endpoint",
+    "фронт": "frontend",
+    "бэк": "backend",
+    "либа": "library",
+    "либы": "libraries",
+    "зависимости": "dependencies"
+  }
+}
