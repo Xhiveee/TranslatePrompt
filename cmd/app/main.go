@@ -235,6 +235,11 @@ func (a *app) onHotkey(id int) {
 		a.inPlaceTranslate()
 	case hotkeyPopup:
 		hwnd := winapi.ForegroundHWND()
+		if a.pop.IsWindow(hwnd) {
+			// Popup already has focus — keep the saved destination
+			// instead of capturing the popup itself as the target.
+			break
+		}
 		cls := a.cfg.Get().Classify(winapi.ProcessExeName(hwnd))
 		a.pop.Show(hwnd, cls == config.ClassTerminal)
 	}

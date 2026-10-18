@@ -276,6 +276,13 @@ func (p *Popup) Show(savedHwnd uintptr, savedIsTerminal bool) {
 	procSetFocus.Call(p.hwndEdit)
 }
 
+// IsWindow reports whether hwnd is the popup itself or its EDIT child —
+// used to avoid re-capturing the popup as the paste destination when
+// the popup hotkey fires while the popup is focused.
+func (p *Popup) IsWindow(hwnd uintptr) bool {
+	return hwnd == p.hwnd || hwnd == p.hwndEdit
+}
+
 func (p *Popup) Hide() {
 	if p.hwnd != 0 {
 		procShowWindow.Call(p.hwnd, swHide)

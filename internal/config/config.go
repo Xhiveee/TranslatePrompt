@@ -178,8 +178,21 @@ func ParseHotkey(s string) (Hotkey, error) {
 		h.Key = 'A' + (key[0] - 'a')
 	case len(key) == 1 && key[0] >= '0' && key[0] <= '9':
 		h.Key = key[0]
+	case len(key) >= 2 && key[0] == 'f':
+		// F1–F24 → VK_F1 (0x70) .. VK_F24 (0x87)
+		n := 0
+		for _, c := range key[1:] {
+			if c < '0' || c > '9' {
+				return h, fmt.Errorf("unsupported key %q", key)
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n < 1 || n > 24 {
+			return h, fmt.Errorf("function key %q out of range (F1-F24)", key)
+		}
+		h.Key = 0x70 + byte(n-1)
 	default:
-		return h, fmt.Errorf("unsupported key %q (letters and digits only)", key)
+		return h, fmt.Errorf("unsupported key %q (letters, digits, F1-F24)", key)
 	}
 	return h, nil
 }
