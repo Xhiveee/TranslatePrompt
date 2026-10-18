@@ -46,6 +46,27 @@ func TestSlangDoesNotReplaceSubstrings(t *testing.T) {
 	}
 }
 
+func TestLiteralPlaceholdersSurvive(t *testing.T) {
+	src := "объясни `cmd` и [[0]] и [[ 7 ]]"
+	masked, originals := Mask(src)
+	got := Unmask(masked, originals)
+	if got != src {
+		t.Fatalf("literal placeholders not preserved:\n got: %q\nwant: %q", got, src)
+	}
+	// The literal [[0]] must not be duplicated by a generated token.
+	if strings.Count(got, "`cmd`") != 1 {
+		t.Fatalf("masked token leaked into literal text: %q", got)
+	}
+}
+
+func TestSlangAdjacentOccurrences(t *testing.T) {
+	dict := map[string]string{"ручка": "endpoint"}
+	got := ApplySlang("ручка ручка ручка", dict)
+	if got != "endpoint endpoint endpoint" {
+		t.Fatalf("adjacent slang not replaced: %q", got)
+	}
+}
+
 func TestProcessPipeline(t *testing.T) {
 	dict := map[string]string{"сбилди": "build"}
 	src := "сбилди ./cmd/app"

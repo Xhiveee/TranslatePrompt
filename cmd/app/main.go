@@ -190,27 +190,43 @@ func (a *app) syncHotkeys() {
 		if a.registered[id] == hk {
 			continue
 		}
+		old, wasRegistered := a.registered[id]
 		procUnregisterHotKey.Call(0, uintptr(id))
-		mods := uintptr(modNoRepeat)
-		if hk.ModAlt {
-			mods |= modAlt
-		}
-		if hk.ModCtrl {
-			mods |= modControl
-		}
-		if hk.ModShift {
-			mods |= modShift
-		}
-		if hk.ModWin {
-			mods |= modWin
-		}
-		r, _, _ := procRegisterHotKey.Call(0, uintptr(id), mods, uintptr(hk.Key))
+		// Keep the map in sync with Win32: after unregistering, the old
+		// chord is genuinely gone even if the new registration fails.
+		delete(a.registered, id)
+		r, _, _ := procRegisterHotKey.Call(0, uintptr(id), hotkeyMods(hk), uintptr(hk.Key))
 		if r == 0 {
 			log.Printf("RegisterHotKey failed for %q", chord)
+			// Try to bring the previous chord back so the daemon does not
+			// silently lose a working hotkey when the new one conflicts.
+			if wasRegistered {
+				if r2, _, _ := procRegisterHotKey.Call(
+					0, uintptr(id), hotkeyMods(old), uintptr(old.Key)); r2 != 0 {
+					a.registered[id] = old
+				}
+			}
 			continue
 		}
 		a.registered[id] = hk
 	}
+}
+
+func hotkeyMods(hk config.Hotkey) uintptr {
+	mods := uintptr(modNoRepeat)
+	if hk.ModAlt {
+		mods |= modAlt
+	}
+	if hk.ModCtrl {
+		mods |= modControl
+	}
+	if hk.ModShift {
+		mods |= modShift
+	}
+	if hk.ModWin {
+		mods |= modWin
+	}
+	return mods
 }
 
 func (a *app) onHotkey(id int) {
@@ -233,36 +249,40 @@ func (a *app) inPlaceTranslate() {
 		return
 	}
 
-	// Preserve the user's clipboard so we can restore it after paste.
-	saved := winapi.ReadClipboardText()
+	// Preserve the whole clipboard (every memory-backed format) so a
+	// copied file or image survives the temporary translated text.
+	saved := winapi.SnapshotClipboard()
 
 	// Don't let a still-held Alt/Q collide with synthetic keystrokes.
 	winapi.ReleaseModifiers(300 * time.Millisecond)
 
 	var source string
+	copied := false
 	switch cls {
 	case config.ClassGUI:
 		prev := winapi.ClipboardSeq()
 		winapi.SendSelectAll()
 		winapi.SendCopy()
-		winapi.WaitClipboardChange(prev, time.Duration(cfg.ClipboardTimeout)*time.Millisecond)
+		// A changed sequence number — not a text comparison — proves
+		// Ctrl+C worked; identical content still bumps the sequence.
+		copied = winapi.WaitClipboardChange(prev, time.Duration(cfg.ClipboardTimeout)*time.Millisecond)
 		source = winapi.ReadClipboardText()
 	case config.ClassTerminal:
 		// NEVER Ctrl+A/Ctrl+C in a terminal — that injects SIGINT into
 		// the CLI agent. Use whatever mouse-select already copied.
-		source = saved
+		source = winapi.ReadClipboardText()
+		copied = source != ""
 	}
 
-	if source == "" || source == saved && cls == config.ClassGUI {
-		// Nothing captured; restore and bail.
-		winapi.WriteClipboardText(saved)
+	if !copied || source == "" {
+		winapi.RestoreClipboard(saved)
 		return
 	}
 
 	translated, err := translateText(a.tr, source, cfg.SlangDictionary)
 	if err != nil {
 		log.Printf("translate: %v", err)
-		winapi.WriteClipboardText(saved)
+		winapi.RestoreClipboard(saved)
 		return
 	}
 
@@ -274,7 +294,7 @@ func (a *app) inPlaceTranslate() {
 	}
 
 	time.Sleep(time.Duration(cfg.RestoreDelay) * time.Millisecond)
-	winapi.WriteClipboardText(saved)
+	winapi.RestoreClipboard(saved)
 }
 
 // onPopupSubmit implements Mode B (Alt+W): translate popup text and
@@ -296,7 +316,7 @@ func (a *app) onPopupSubmit(text string, targetHwnd uintptr, targetIsTerminal bo
 	winapi.ReleaseModifiers(300 * time.Millisecond)
 	time.Sleep(50 * time.Millisecond)
 
-	saved := winapi.ReadClipboardText()
+	saved := winapi.SnapshotClipboard()
 	winapi.WriteClipboardText(translated)
 	if targetIsTerminal {
 		winapi.SendTerminalPaste()
@@ -305,7 +325,7 @@ func (a *app) onPopupSubmit(text string, targetHwnd uintptr, targetIsTerminal bo
 	}
 
 	time.Sleep(time.Duration(cfg.RestoreDelay) * time.Millisecond)
-	winapi.WriteClipboardText(saved)
+	winapi.RestoreClipboard(saved)
 }
 
 // translateText runs the sanitizer → translator → unmask pipeline.

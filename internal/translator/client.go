@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -235,6 +236,18 @@ func splitChunks(text string, limit int) []string {
 			cut = idx + 1
 		} else if idx := strings.LastIndexAny(text[:limit], ".!? "); idx > limit/2 {
 			cut = idx + 1
+		}
+		// Never bisect a UTF-8 character: back the cut up to a rune
+		// start byte when it lands mid-character (unbroken Unicode
+		// text with no delimiter to split on).
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		if cut == 0 {
+			// Unreachable in practice (text[0] is always a rune start),
+			// but take the first rune whole rather than bisect it.
+			_, size := utf8.DecodeRuneInString(text)
+			cut = size
 		}
 		chunks = append(chunks, text[:cut])
 		text = text[cut:]

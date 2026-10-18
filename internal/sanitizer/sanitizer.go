@@ -13,6 +13,9 @@ import (
 // Placeholders are [[0]], [[1]], ... — digits survive translation
 // because the free endpoints leave numeric tokens alone.
 var maskPatterns = []*regexp.Regexp{
+	// Literal placeholder-shaped text in the source (`[[0]]`, `[[ 3 ]]`):
+	// must be claimed first so generated tokens never collide with it.
+	regexp.MustCompile(`\[\[\s*\d+\s*\]\]`),
 	// Fenced code blocks: ```...```
 	regexp.MustCompile("(?s)```.*?```"),
 	// Inline code: `...`
@@ -89,8 +92,18 @@ func ApplySlang(text string, dictionary map[string]string) string {
 
 	out := text
 	for _, k := range keys {
+		// The boundary groups consume the separator around a match, so a
+		// single pass leaves every other adjacent occurrence untouched
+		// ("ручка ручка" -> "endpoint ручка"). Re-run until stable: each
+		// pass replaces at least one occurrence or the loop ends.
 		re := regexp.MustCompile(`(?i)(^|[^\p{L}\p{N}_])` + regexp.QuoteMeta(k) + `([^\p{L}\p{N}_]|$)`)
-		out = re.ReplaceAllString(out, "${1}"+dictionary[k]+"${2}")
+		for {
+			next := re.ReplaceAllString(out, "${1}"+dictionary[k]+"${2}")
+			if next == out {
+				break
+			}
+			out = next
+		}
 	}
 	return out
 }

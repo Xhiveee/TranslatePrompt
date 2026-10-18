@@ -13,6 +13,9 @@ var (
 	ntdll             = windows.NewLazySystemDLL("ntdll.dll")
 	procLstrlenW      = kernel32.NewProc("lstrlenW")
 	procRtlMoveMemory = ntdll.NewProc("RtlMoveMemory")
+
+	procEnumClipboardFormats = user32.NewProc("EnumClipboardFormats")
+	procGlobalSize           = kernel32.NewProc("GlobalSize")
 )
 
 // sendKeys synthesizes a chord: press each vk in order, release in
@@ -169,4 +172,80 @@ func WriteClipboardText(text string) bool {
 	}
 	// Ownership of hMem now belongs to the system — do NOT free it.
 	return true
+}
+
+// ClipboardItem is one clipboard format captured as raw bytes.
+type ClipboardItem struct {
+	Format uint32
+	Data   []byte
+}
+
+// SnapshotClipboard copies every memory-backed clipboard format so the
+// original contents (text, files, images carried via HGLOBAL formats)
+// can be restored after the daemon briefly holds translated text.
+// Formats whose data is not an HGLOBAL (e.g. CF_BITMAP GDI handles)
+// have no byte block to copy and are skipped.
+func SnapshotClipboard() []ClipboardItem {
+	if !openClipboard() {
+		return nil
+	}
+	defer procCloseClipboard.Call()
+
+	var items []ClipboardItem
+	for format := uintptr(0); ; {
+		format, _, _ = procEnumClipboardFormats.Call(format)
+		if format == 0 {
+			break
+		}
+		h, _, _ := procGetClipboardData.Call(format)
+		if h == 0 {
+			continue
+		}
+		size, _, _ := procGlobalSize.Call(h)
+		if size == 0 {
+			continue // not a global-memory block (HBITMAP etc.)
+		}
+		p, _, _ := procGlobalLock.Call(h)
+		if p == 0 {
+			continue
+		}
+		buf := make([]byte, size)
+		procRtlMoveMemory.Call(
+			uintptr(unsafe.Pointer(&buf[0])), p, size)
+		procGlobalUnlock.Call(h)
+		items = append(items, ClipboardItem{
+			Format: uint32(format), Data: buf,
+		})
+	}
+	return items
+}
+
+// RestoreClipboard writes a snapshot back, replacing current contents.
+// An empty snapshot leaves the clipboard empty.
+func RestoreClipboard(items []ClipboardItem) {
+	if !openClipboard() {
+		return
+	}
+	defer procCloseClipboard.Call()
+	procEmptyClipboard.Call()
+
+	for _, it := range items {
+		size := uintptr(len(it.Data))
+		hMem, _, _ := procGlobalAlloc.Call(gmemMoveable, size)
+		if hMem == 0 {
+			continue
+		}
+		p, _, _ := procGlobalLock.Call(hMem)
+		if p == 0 {
+			procGlobalFree.Call(hMem)
+			continue
+		}
+		procRtlMoveMemory.Call(
+			p, uintptr(unsafe.Pointer(&it.Data[0])), size)
+		procGlobalUnlock.Call(hMem)
+		if r, _, _ := procSetClipboardData.Call(
+			uintptr(it.Format), hMem); r == 0 {
+			procGlobalFree.Call(hMem)
+		}
+	}
 }

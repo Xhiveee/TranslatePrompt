@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestYandexPrimary(t *testing.T) {
@@ -107,6 +108,21 @@ func TestSplitChunks(t *testing.T) {
 	for _, ch := range chunks {
 		if len(ch) > maxTextLen {
 			t.Fatalf("chunk too large: %d", len(ch))
+		}
+	}
+}
+
+func TestSplitChunksKeepsUTF8Intact(t *testing.T) {
+	// Unbroken Cyrillic text — no delimiters, so cuts fall wherever
+	// the byte limit lands.
+	long := strings.Repeat("ё", maxTextLen*2) // 2 bytes per rune
+	chunks := splitChunks(long, maxTextLen)
+	if strings.Join(chunks, "") != long {
+		t.Fatal("chunks do not reassemble to original")
+	}
+	for _, ch := range chunks {
+		if !utf8.ValidString(ch) {
+			t.Fatalf("chunk splits a rune: %q...", ch[:20])
 		}
 	}
 }
